@@ -15,6 +15,7 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { marked } from 'marked'
+import clauditorIcon from '../../assets/clauditor_icon_big.png'
 
 marked.setOptions({ breaks: true, gfm: true })
 
@@ -24,6 +25,7 @@ const selectedMic = ref('')
 const selectedMonitor = ref('')
 const protocolsDir = ref('')
 const model = ref('')
+const models = ref([])
 const language = ref('de')
 const diarization = ref(false)
 const hfToken = ref('')
@@ -115,6 +117,7 @@ async function loadConfig() {
   const cfg = await window.api.getConfig()
   protocolsDir.value = cfg.protocolsDir
   model.value = cfg.model
+  models.value = cfg.models
   language.value = cfg.language
   diarization.value = cfg.diarization
   hfToken.value = cfg.hfToken
@@ -123,6 +126,15 @@ async function loadConfig() {
 async function saveLanguage() {
   try {
     await window.api.setConfig({ language: language.value })
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+// persist the selected whisper model on change
+async function saveModel() {
+  try {
+    await window.api.setConfig({ model: model.value })
   } catch (e) {
     error.value = e.message
   }
@@ -229,13 +241,16 @@ onBeforeUnmount(() => {
     </header>
 
     <section class="controls">
-      <div class="row">
+      <div class="row sources">
         <label>
           <span>Mikrofon</span>
           <select v-model="selectedMic" :disabled="recording || busy">
             <option v-for="m in mics" :key="m.name" :value="m.name">{{ m.label }}</option>
           </select>
         </label>
+        <div class="source-logo-slot">
+          <img class="source-logo" :src="clauditorIcon" alt="clauditor" />
+        </div>
         <label>
           <span>System-Ton (Monitor)</span>
           <select v-model="selectedMonitor" :disabled="recording || busy">
@@ -299,7 +314,12 @@ onBeforeUnmount(() => {
             <option value="en">Englisch</option>
           </select>
         </label>
-        <span class="model">Modell: <code>{{ model }}</code></span>
+        <label class="model">
+          <span>Modell</span>
+          <select v-model="model" @change="saveModel" :disabled="recording || busy">
+            <option v-for="m in models" :key="m" :value="m">{{ m }}</option>
+          </select>
+        </label>
       </div>
     </section>
 
@@ -364,6 +384,14 @@ onBeforeUnmount(() => {
 .row { display: flex; gap: 16px; margin-bottom: 14px; }
 .row label { flex: 1; display: flex; flex-direction: column; gap: 6px; }
 .row label span { color: var(--muted); font-size: 12px; }
+.row.sources { align-items: flex-end; }
+/* reserves horizontal space between the inputs so they keep a margin to the logo */
+.source-logo-slot { flex: 0 0 auto; align-self: stretch; position: relative; width: 109px; }
+/* centered inside its slot; overflows vertically without growing the row */
+.source-logo {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, calc(-50% + 8px));
+  height: 109px; width: auto; object-fit: contain; pointer-events: none;
+}
 .row.dir { align-items: flex-end; }
 .row.diarize { flex-direction: column; align-items: flex-start; gap: 12px; }
 .row.diarize .token { width: 100%; flex-direction: row; align-items: center; gap: 10px; }
@@ -389,8 +417,9 @@ onBeforeUnmount(() => {
 .actions .lang span { color: var(--muted); font-size: 13px; }
 .actions .lang select { width: auto; }
 .big { padding: 12px 22px; font-size: 15px; font-weight: 600; }
-.model { color: var(--muted); }
-.model code { color: var(--text); }
+.actions .model { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+.actions .model span { color: var(--muted); font-size: 13px; }
+.actions .model select { width: auto; }
 .btn-ghost { background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; }
 .btn-ghost:hover:not(:disabled) { border-color: var(--accent); }
 

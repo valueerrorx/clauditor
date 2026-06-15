@@ -23,7 +23,7 @@ import { randomBytes } from 'node:crypto'
 const execFileAsync = promisify(execFile)
 
 import { listDevices, startRecording, stopRecording, measureMaxVolumeDb, convertToWav } from './audio.js'
-import { transcribe, MODEL_NAME } from './transcribe.js'
+import { transcribe, MODEL_NAME, MODELS } from './transcribe.js'
 import { diarize } from './diarize.js'
 import { summarize } from './summarize.js'
 import { readExistingNotes, buildFilename, saveNote } from './notes.js'
@@ -129,7 +129,8 @@ function createTray() {
 
 ipcMain.handle('devices:list', () => listDevices())
 
-ipcMain.handle('config:get', () => loadConfig())
+// expose the available whisper models so the renderer can build its dropdown
+ipcMain.handle('config:get', async () => ({ ...(await loadConfig()), models: MODELS }))
 
 // open external links (e.g. setup pages) in the system browser
 ipcMain.handle('shell:openExternal', (_e, url) => {
@@ -144,6 +145,7 @@ ipcMain.handle('config:set', async (_e, patch) => {
   if (typeof patch?.diarization === 'boolean') next.diarization = patch.diarization
   if (typeof patch?.hfToken === 'string') next.hfToken = patch.hfToken.trim()
   if (LANGUAGES.includes(patch?.language)) next.language = patch.language
+  if (MODELS.includes(patch?.model)) next.model = patch.model
   await saveConfig(next)
   return next
 })
@@ -200,7 +202,7 @@ async function processAudio(wav) {
         language,
         onLog: log
       })
-    : await transcribe(wav, { language, onLog: log })
+    : await transcribe(wav, { language, model: cfg.model, onLog: log })
 
   // distinguish "no sound" from "audio present but no speech"
   if (!transcript || !transcript.trim()) {

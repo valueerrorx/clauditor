@@ -18,6 +18,21 @@ import { dirname, join } from 'node:path'
 // nodejs-whisper is CJS, load it via require interop
 const require = createRequire(import.meta.url)
 
+// whisper models supported by nodejs-whisper (see its constants MODELS_LIST)
+export const MODELS = [
+  'tiny',
+  'tiny.en',
+  'base',
+  'base.en',
+  'small',
+  'small.en',
+  'medium',
+  'medium.en',
+  'large-v1',
+  'large',
+  'large-v3-turbo'
+]
+
 // whisper model can be overridden, defaults to a balanced offline model
 export const MODEL_NAME = process.env.CLAUDITOR_MODEL || 'small'
 
@@ -33,18 +48,18 @@ function ensureWhisperLibPath() {
 }
 
 // run whisper.cpp on a 16kHz wav and return the plain transcript text
-export async function transcribe(wavFile, { language = 'auto', onLog } = {}) {
+export async function transcribe(wavFile, { language = 'auto', model = MODEL_NAME, onLog } = {}) {
   const { nodewhisper } = require('nodejs-whisper')
 
   ensureWhisperLibPath()
-  onLog?.(`Transkribiere mit Modell "${MODEL_NAME}" …`)
+  onLog?.(`Transkribiere mit Modell "${model}" …`)
   // nodejs-whisper does shelljs.cd into its cpp dir and never restores it; guard our cwd
   const cwd0 = process.cwd()
   let result
   try {
     result = await nodewhisper(wavFile, {
-      modelName: MODEL_NAME,
-      autoDownloadModelName: MODEL_NAME,
+      modelName: model,
+      autoDownloadModelName: model,
       removeWavFileAfterTranscription: false,
       withCuda: false,
       whisperOptions: {
