@@ -1,3 +1,17 @@
+<!--
+  clauditor - records mic + system audio, transcribes offline and summarizes with Claude
+  Copyright (C) 2026 Thomas Weissel <valueerror@gmail.com>
+  SPDX-License-Identifier: GPL-3.0-or-later
+
+  This program is free software: you can redistribute it and/or modify it under
+  the terms of the GNU General Public License as published by the Free Software
+  Foundation, either version 3 of the License, or (at your option) any later version.
+  This program is distributed in the hope that it will be useful, but WITHOUT ANY
+  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+  PARTICULAR PURPOSE. See the GNU General Public License for more details.
+  You should have received a copy of the GNU General Public License along with
+  this program. If not, see <https://www.gnu.org/licenses/>.
+-->
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { marked } from 'marked'
@@ -10,6 +24,9 @@ const selectedMic = ref('')
 const selectedMonitor = ref('')
 const protocolsDir = ref('')
 const model = ref('')
+const language = ref('de')
+const diarization = ref(false)
+const hfToken = ref('')
 
 const recording = ref(false)
 const busy = ref(false)
@@ -24,6 +41,28 @@ const saving = ref(false)
 
 let timer = null
 let unsubscribe = null
+
+// width of the resizable left status panel
+const leftWidth = ref(320)
+const panelStyle = computed(() => ({ gridTemplateColumns: `${leftWidth.value}px 6px 1fr` }))
+
+function startDrag(e) {
+  const panelsEl = e.currentTarget.parentElement
+  const rect = panelsEl.getBoundingClientRect()
+  const onMove = (ev) => {
+    const w = ev.clientX - rect.left
+    // keep both sides usable
+    leftWidth.value = Math.max(220, Math.min(w, rect.width - 360))
+  }
+  const onUp = () => {
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', onUp)
+    document.body.style.userSelect = ''
+  }
+  document.body.style.userSelect = 'none'
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp)
+}
 
 // render the (possibly edited) markdown to html for the preview tab
 const renderedHtml = computed(() => (result.value ? marked.parse(editContent.value) : ''))
@@ -76,6 +115,26 @@ async function loadConfig() {
   const cfg = await window.api.getConfig()
   protocolsDir.value = cfg.protocolsDir
   model.value = cfg.model
+  language.value = cfg.language
+  diarization.value = cfg.diarization
+  hfToken.value = cfg.hfToken
+}
+
+async function saveLanguage() {
+  try {
+    await window.api.setConfig({ language: language.value })
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+// persist diarization settings on change
+async function saveDiarization() {
+  try {
+    await window.api.setConfig({ diarization: diarization.value, hfToken: hfToken.value })
+  } catch (e) {
+    error.value = e.message
+  }
 }
 
 async function chooseDir() {
@@ -111,12 +170,37 @@ async function stop() {
   }
 }
 
+async function importAudio() {
+  if (recording.value || busy.value) return
+  error.value = ''
+  result.value = null
+  logs.value = []
+  busy.value = true
+  try {
+    // null means the file dialog was cancelled
+    const r = await window.api.importAudio()
+    if (r) result.value = r
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    busy.value = false
+  }
+}
+
 function openFolder() {
   window.api.openFolder()
 }
 
-function openFolderInObsidian() {
-  window.api.openFolderInObsidian()
+async function openFolderInObsidian() {
+  try {
+    await window.api.openFolderInObsidian()
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+function openExternal(url) {
+  window.api.openExternal(url)
 }
 
 onMounted(async () => {
@@ -173,14 +257,53 @@ onBeforeUnmount(() => {
         <button @click="openFolderInObsidian">Ordner in Obsidian öffnen</button>
       </div>
 
+      <div class="row diarize">
+        <label class="check">
+          <input type="checkbox" v-model="diarization" @change="saveDiarization" :disabled="recording || busy" />
+          <span>Sprechererkennung (WhisperX)</span>
+        </label>
+        <label class="grow token" v-if="diarization">
+          <span>HuggingFace-Token (für Diarisierung)</span>
+          <input
+            type="password"
+            v-model="hfToken"
+            @change="saveDiarization"
+            :disabled="recording || busy"
+            placeholder="hf_…"
+          />
+        </label>
+      </div>
+      <p class="hint" v-if="diarization && !hfToken">
+        Einmalig nötig:
+        1.
+        <a href="#" @click.prevent="openExternal('https://huggingface.co/pyannote/speaker-diarization-community-1')">
+          Lizenz von pyannote/speaker-diarization-community-1 akzeptieren
+        </a>,
+        2.
+        <a href="#" @click.prevent="openExternal('https://huggingface.co/settings/tokens')">
+          Read-Token erstellen
+        </a>
+        und oben einfügen. WhisperX wird beim ersten Lauf automatisch installiert (über uv).
+      </p>
+
       <div class="actions">
         <button v-if="!recording" class="btn-primary big" @click="start" :disabled="busy">● Aufnahme starten</button>
         <button v-else class="btn-danger big" @click="stop">■ Stoppen & Zusammenfassen</button>
+        <button class="btn-ghost big" @click="importAudio" :disabled="recording || busy">⇪ Audio importieren</button>
+        <span class="spacer"></span>
+        <label class="lang">
+          <span>Sprache</span>
+          <select v-model="language" @change="saveLanguage" :disabled="recording || busy">
+            <option value="auto">Automatisch</option>
+            <option value="de">Deutsch</option>
+            <option value="en">Englisch</option>
+          </select>
+        </label>
         <span class="model">Modell: <code>{{ model }}</code></span>
       </div>
     </section>
 
-    <section class="panels">
+    <section class="panels" :style="panelStyle">
       <div class="panel log">
         <h2>Status</h2>
         <p v-if="error" class="error">{{ error }}</p>
@@ -189,6 +312,8 @@ onBeforeUnmount(() => {
           <li v-if="!logs.length" class="muted">Noch keine Aktivität.</li>
         </ul>
       </div>
+
+      <div class="splitter" @mousedown="startDrag" title="Ziehen zum Verbreitern"></div>
 
       <div class="panel result" v-if="result">
         <div class="result-head">
@@ -240,6 +365,16 @@ onBeforeUnmount(() => {
 .row label { flex: 1; display: flex; flex-direction: column; gap: 6px; }
 .row label span { color: var(--muted); font-size: 12px; }
 .row.dir { align-items: flex-end; }
+.row.diarize { flex-direction: column; align-items: flex-start; gap: 12px; }
+.row.diarize .token { width: 100%; flex-direction: row; align-items: center; gap: 10px; }
+.row.diarize .token span { white-space: nowrap; }
+.row.diarize .token input { flex: 0 0 auto; width: 40ch; }
+.check { flex: 0 0 auto; flex-direction: row !important; align-items: center; gap: 8px; cursor: pointer; }
+.check input { width: 16px; height: 16px; }
+.check span { color: var(--text) !important; font-size: 14px !important; }
+.hint { margin: -6px 0 14px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.hint code { color: var(--text); }
+.hint a { color: var(--accent); text-decoration: underline; cursor: pointer; }
 .grow { flex: 1; }
 .input-group { display: flex; }
 .input-group .dirbox {
@@ -249,13 +384,21 @@ onBeforeUnmount(() => {
 .dirbox { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .actions { display: flex; align-items: center; gap: 16px; }
+.actions .spacer { flex: 1; }
+.actions .lang { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+.actions .lang span { color: var(--muted); font-size: 13px; }
+.actions .lang select { width: auto; }
 .big { padding: 12px 22px; font-size: 15px; font-weight: 600; }
 .model { color: var(--muted); }
 .model code { color: var(--text); }
+.btn-ghost { background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; }
+.btn-ghost:hover:not(:disabled) { border-color: var(--accent); }
 
-.panels { flex: 1; display: grid; grid-template-columns: 320px 1fr; gap: 0; overflow: hidden; }
+.panels { flex: 1; display: grid; grid-template-columns: 320px 6px 1fr; gap: 0; overflow: hidden; min-height: 0; }
 .panel { padding: 16px 20px; overflow: auto; }
-.panel.log { border-right: 1px solid var(--border); background: var(--bg); }
+.panel.log { background: var(--bg); }
+.splitter { cursor: col-resize; background: var(--border); transition: background .15s; }
+.splitter:hover { background: var(--accent); }
 .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 12px; }
 .log ul { list-style: none; margin: 0; padding: 0; }
 .log li { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }

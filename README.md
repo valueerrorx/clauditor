@@ -40,3 +40,9 @@ Im Fenster: Mikrofon + System-Ton (Monitor) wählen, Protokoll-Ordner setzen, **
 ```bash
 CLAUDITOR_MODEL=medium npm run dev
 ```
+
+## Lizenz
+
+Copyright (C) 2026 Thomas Weissel
+
+clauditor ist freie Software unter der **GNU General Public License v3.0 oder später** (GPL-3.0-or-later). Du darfst das Programm weitergeben und/oder verändern – unter den Bedingungen der GPL. Den vollständigen Lizenztext findest du in der Datei [`LICENSE`](./LICENSE) oder unter <https://www.gnu.org/licenses/gpl-3.0.html>.

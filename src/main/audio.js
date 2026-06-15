@@ -1,3 +1,16 @@
+// clauditor - records mic + system audio, transcribes offline and summarizes with Claude
+// Copyright (C) 2026 Thomas Weissel <valueerror@gmail.com>
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This program is free software: you can redistribute it and/or modify it under
+// the terms of the GNU General Public License as published by the Free Software
+// Foundation, either version 3 of the License, or (at your option) any later version.
+// This program is distributed in the hope that it will be useful, but WITHOUT ANY
+// WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+// PARTICULAR PURPOSE. See the GNU General Public License for more details.
+// You should have received a copy of the GNU General Public License along with
+// this program. If not, see <https://www.gnu.org/licenses/>.
+
 import { spawn, execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 
@@ -74,6 +87,37 @@ export function startRecording({ mic, monitor, outFile }) {
   proc.stderr.on('data', (d) => { stderr += d.toString() })
   proc._getStderr = () => stderr
   return proc
+}
+
+// convert any audio file into the 16kHz mono wav both transcription paths expect
+export function convertToWav(input, outFile) {
+  return new Promise((resolve, reject) => {
+    const args = ['-hide_banner', '-loglevel', 'error', '-y', '-i', input, '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', outFile]
+    const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] })
+    let stderr = ''
+    proc.stderr.on('data', (d) => { stderr += d.toString() })
+    proc.on('error', (e) => reject(new Error(`ffmpeg konnte nicht gestartet werden: ${e.message}`)))
+    proc.on('close', (code) => {
+      if (code === 0) resolve(outFile)
+      else reject(new Error(`Konvertierung fehlgeschlagen (Code ${code}): ${stderr.trim()}`))
+    })
+  })
+}
+
+// measure the peak loudness of a wav in dBFS, returns null if it cannot be read
+export async function measureMaxVolumeDb(wav) {
+  try {
+    const { stderr } = await execFileAsync('ffmpeg', ['-hide_banner', '-i', wav, '-af', 'volumedetect', '-f', 'null', '-'], {
+      maxBuffer: 1024 * 1024
+    }).catch((e) => ({ stderr: e.stderr || '' }))
+    const m = stderr.match(/max_volume:\s*(-?\d+(?:\.\d+)?)\s*dB/)
+    if (m) return Number(m[1])
+    // ffmpeg reports "-inf" for absolute digital silence
+    if (/max_volume:\s*-inf/.test(stderr)) return -Infinity
+    return null
+  } catch {
+    return null
+  }
 }
 
 // gracefully stop ffmpeg so the wav header is finalized
