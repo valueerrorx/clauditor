@@ -33,6 +33,7 @@ const hfToken = ref('')
 const recording = ref(false)
 const busy = ref(false)
 const elapsed = ref(0)
+const procElapsed = ref(0)
 const logs = ref([])
 const result = ref(null)
 const error = ref('')
@@ -45,10 +46,11 @@ const saving = ref(false)
 const logEl = ref(null)
 
 let timer = null
+let procTimer = null
 let unsubscribe = null
 
 // width of the resizable left status panel
-const leftWidth = ref(320)
+const leftWidth = ref(420)
 const panelStyle = computed(() => ({ gridTemplateColumns: `${leftWidth.value}px 6px 1fr` }))
 
 function startDrag(e) {
@@ -102,6 +104,21 @@ const elapsedLabel = computed(() => {
   const m = String(Math.floor(elapsed.value / 60)).padStart(2, '0')
   const s = String(elapsed.value % 60).padStart(2, '0')
   return `${m}:${s}`
+})
+
+const procElapsedLabel = computed(() => {
+  const m = String(Math.floor(procElapsed.value / 60)).padStart(2, '0')
+  const s = String(procElapsed.value % 60).padStart(2, '0')
+  return `${m}:${s}`
+})
+
+// run a 1s ticker while processing so the UI proves it is still alive
+watch(busy, (v) => {
+  clearInterval(procTimer)
+  if (v) {
+    procElapsed.value = 0
+    procTimer = setInterval(() => { procElapsed.value++ }, 1000)
+  }
 })
 
 function pushLog(msg) {
@@ -241,6 +258,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   clearInterval(timer)
+  clearInterval(procTimer)
   unsubscribe?.()
 })
 </script>
@@ -252,7 +270,12 @@ onBeforeUnmount(() => {
         <span class="dot" :class="{ live: recording, work: busy }"></span>
         <h1>clauditor - meeting assistant</h1>
       </div>
-      <div class="state">{{ status }}<span v-if="recording" class="timer">{{ elapsedLabel }}</span></div>
+      <div class="state">
+        <span v-if="busy" class="spinner"></span>
+        {{ status }}
+        <span v-if="recording" class="timer">{{ elapsedLabel }}</span>
+        <span v-else-if="busy" class="timer">{{ procElapsedLabel }}</span>
+      </div>
     </header>
 
     <section class="controls">
@@ -344,7 +367,8 @@ onBeforeUnmount(() => {
         <p v-if="error" class="error">{{ error }}</p>
         <ul>
           <li v-for="(l, i) in logs" :key="i"><span class="time">{{ l.t }}</span>{{ l.msg }}</li>
-          <li v-if="!logs.length" class="muted">Noch keine Aktivität.</li>
+          <li v-if="busy" class="busy-row"><span class="spinner"></span>Verarbeite … {{ procElapsedLabel }}</li>
+          <li v-if="!logs.length && !busy" class="muted">Noch keine Aktivität.</li>
         </ul>
       </div>
 
@@ -394,6 +418,13 @@ onBeforeUnmount(() => {
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
 .state { color: var(--muted); display: flex; align-items: center; gap: 10px; }
 .timer { font-variant-numeric: tabular-nums; color: var(--text); font-weight: 600; }
+.spinner {
+  display: inline-block; width: 14px; height: 14px; flex: 0 0 auto;
+  border: 2px solid var(--border); border-top-color: var(--accent);
+  border-radius: 50%; animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.busy-row { display: flex; align-items: center; gap: 8px; color: var(--accent); font-variant-numeric: tabular-nums; }
 
 .controls { padding: 18px 20px; border-bottom: 1px solid var(--border); background: var(--panel); }
 .row { display: flex; gap: 16px; margin-bottom: 14px; }
@@ -438,7 +469,7 @@ onBeforeUnmount(() => {
 .btn-ghost { background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; }
 .btn-ghost:hover:not(:disabled) { border-color: var(--accent); }
 
-.panels { flex: 1; display: grid; grid-template-columns: 320px 6px 1fr; gap: 0; overflow: hidden; min-height: 0; }
+.panels { flex: 1; display: grid; grid-template-columns: 420px 6px 1fr; gap: 0; overflow: hidden; min-height: 0; }
 .panel { padding: 16px 20px; overflow: auto; }
 .panel.log { background: var(--bg); }
 .splitter { cursor: col-resize; background: var(--border); transition: background .15s; }

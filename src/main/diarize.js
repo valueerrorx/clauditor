@@ -130,7 +130,19 @@ export async function diarize(wavFile, { venvDir, model = 'small', hfToken, lang
   if (language && language !== 'auto') args.push('--language', language)
 
   onLog?.('Transkribiere + erkenne Sprecher mit WhisperX …')
-  await run(whisperxBin, args, { env: { ...env, HF_TOKEN: hfToken }, onLog, label: 'whisperx' })
+  // pyannote diarization runs silently on CPU for minutes; emit a heartbeat so the log keeps moving
+  const startedAt = Date.now()
+  const heartbeat = setInterval(() => {
+    const s = Math.round((Date.now() - startedAt) / 1000)
+    const mm = String(Math.floor(s / 60)).padStart(2, '0')
+    const ss = String(s % 60).padStart(2, '0')
+    onLog?.(`WhisperX arbeitet noch … (${mm}:${ss}) – Sprechererkennung ist CPU-intensiv und meldet sich zwischendurch nicht.`)
+  }, 20000)
+  try {
+    await run(whisperxBin, args, { env: { ...env, HF_TOKEN: hfToken }, onLog, label: 'whisperx' })
+  } finally {
+    clearInterval(heartbeat)
+  }
 
   const jsonPath = join(outDir, `${basename(wavFile, extname(wavFile))}.json`)
   const result = JSON.parse(await readFile(jsonPath, 'utf8'))

@@ -1,6 +1,6 @@
 {
   "name": "clauditor",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "clauditor (Claude + audit): records mic + system audio, transcribes offline with whisper.cpp and summarizes with Claude into linked markdown protocols.",
   "type": "module",
   "main": "./out/main/index.js",
