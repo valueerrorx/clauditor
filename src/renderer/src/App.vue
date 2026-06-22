@@ -13,7 +13,7 @@
   this program. If not, see <https://www.gnu.org/licenses/>.
 -->
 <script setup>
-import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
 import { marked } from 'marked'
 import clauditorIcon from '../../assets/clauditor_icon_big.png'
 
@@ -40,6 +40,9 @@ const error = ref('')
 const activeTab = ref('preview')
 const editContent = ref('')
 const saving = ref(false)
+
+// scroll container of the status log, kept pinned to the bottom on new entries
+const logEl = ref(null)
 
 let timer = null
 let unsubscribe = null
@@ -105,6 +108,18 @@ function pushLog(msg) {
   logs.value.push({ t: new Date().toLocaleTimeString(), msg })
 }
 
+// surface errors both in the banner and the visible log stream
+function reportError(message) {
+  error.value = message
+  pushLog(`Fehler: ${message}`)
+}
+
+// always keep the status log scrolled to the newest entry
+watch(() => logs.value.length, async () => {
+  await nextTick()
+  if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight
+})
+
 async function loadDevices() {
   const d = await window.api.listDevices()
   mics.value = d.mics
@@ -164,7 +179,7 @@ async function start() {
     elapsed.value = 0
     timer = setInterval(() => { elapsed.value++ }, 1000)
   } catch (e) {
-    error.value = e.message
+    reportError(e.message)
   }
 }
 
@@ -176,7 +191,7 @@ async function stop() {
   try {
     result.value = await window.api.stopRecording()
   } catch (e) {
-    error.value = e.message
+    reportError(e.message)
   } finally {
     busy.value = false
   }
@@ -193,7 +208,7 @@ async function importAudio() {
     const r = await window.api.importAudio()
     if (r) result.value = r
   } catch (e) {
-    error.value = e.message
+    reportError(e.message)
   } finally {
     busy.value = false
   }
@@ -324,7 +339,7 @@ onBeforeUnmount(() => {
     </section>
 
     <section class="panels" :style="panelStyle">
-      <div class="panel log">
+      <div class="panel log" ref="logEl">
         <h2>Status</h2>
         <p v-if="error" class="error">{{ error }}</p>
         <ul>

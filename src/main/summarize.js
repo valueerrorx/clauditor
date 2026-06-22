@@ -105,7 +105,11 @@ export function summarize({ transcript, notes, filename, diarized = false, onLog
     proc.on('error', reject)
     proc.on('close', (code) => {
       if (code === 0 && stdout.trim()) resolve(stdout.trim())
-      else reject(new Error(`Claude beendet mit Code ${code}: ${stderr || 'keine Ausgabe'}`))
+      // claude prints errors (e.g. 401 auth) to stdout, so include both streams
+      else {
+        const detail = (stderr.trim() || stdout.trim()) || 'keine Ausgabe'
+        reject(new Error(`Claude beendet mit Code ${code}: ${detail}`))
+      }
     })
 
     proc.stdin.write(prompt)
