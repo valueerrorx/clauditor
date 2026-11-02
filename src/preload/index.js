@@ -16,6 +16,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 // safe bridge between renderer and main process
 contextBridge.exposeInMainWorld('api', {
   listDevices: () => ipcRenderer.invoke('devices:list'),
+  checkDeps: () => ipcRenderer.invoke('deps:check'),
   getConfig: () => ipcRenderer.invoke('config:get'),
   setConfig: (patch) => ipcRenderer.invoke('config:set', patch),
   chooseDir: () => ipcRenderer.invoke('config:chooseDir'),

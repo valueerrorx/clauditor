@@ -16,27 +16,11 @@ import { access, mkdir, readFile, rm } from 'node:fs/promises'
 import { join, basename, extname } from 'node:path'
 import { tmpdir } from 'node:os'
 
+import { cleanEnv } from './runtime.js'
+
 // whisperx needs a compatible python; system python may be too new, so we let
 // uv provision a pinned interpreter automatically
 const PINNED_PYTHON = '3.12'
-
-// strip AppImage runtime vars inherited from the host launcher (e.g. Cursor),
-// so the python/torch process does not pick up the wrong shared libraries
-function cleanEnv() {
-  const env = { ...process.env }
-  const drop = [
-    'APPIMAGE', 'APPDIR', 'ARGV0', 'APPRUN', 'OWD',
-    'TARGET_APPIMAGE', 'REDIRECT_APPIMAGE', 'DESKTOPINTEGRATION',
-    'LD_LIBRARY_PATH', 'LD_PRELOAD', 'PERLLIB',
-    'GSETTINGS_SCHEMA_DIR', 'QT_PLUGIN_PATH'
-  ]
-  for (const key of drop) delete env[key]
-  for (const key of ['PATH', 'XDG_DATA_DIRS']) {
-    if (!env[key]) continue
-    env[key] = env[key].split(':').filter((p) => !p.includes('/.mount_')).join(':')
-  }
-  return env
-}
 
 // run a command, stream its output line by line to onLog, resolve on exit 0
 function run(cmd, args, { env, onLog, label }) {

@@ -37,6 +37,8 @@ const procElapsed = ref(0)
 const logs = ref([])
 const result = ref(null)
 const error = ref('')
+// external programs that are missing on this system (ffmpeg, pactl, claude, uv)
+const missingDeps = ref([])
 
 const activeTab = ref('preview')
 const editContent = ref('')
@@ -250,6 +252,9 @@ function openExternal(url) {
 onMounted(async () => {
   unsubscribe = window.api.onLog(pushLog)
   try {
+    missingDeps.value = (await window.api.checkDeps()).filter((d) => !d.found)
+  } catch {}
+  try {
     await Promise.all([loadDevices(), loadConfig()])
   } catch (e) {
     error.value = e.message
@@ -364,6 +369,14 @@ onBeforeUnmount(() => {
     <section class="panels" :style="panelStyle">
       <div class="panel log" ref="logEl">
         <h2>Status</h2>
+        <div v-if="missingDeps.length" class="deps">
+          <strong>Fehlende Programme:</strong>
+          <ul>
+            <li v-for="d in missingDeps" :key="d.name" :class="{ optional: !d.required }">
+              <code>{{ d.name }}</code> – {{ d.hint }}<span v-if="!d.required"> (optional)</span>
+            </li>
+          </ul>
+        </div>
         <p v-if="error" class="error">{{ error }}</p>
         <ul>
           <li v-for="(l, i) in logs" :key="i"><span class="time">{{ l.t }}</span>{{ l.msg }}</li>
@@ -479,6 +492,10 @@ onBeforeUnmount(() => {
 .log li { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
 .log .time { color: var(--muted); margin-right: 8px; font-variant-numeric: tabular-nums; }
 .muted { color: var(--muted); }
+.deps { color: #f5b041; background: rgba(245,176,65,.1); padding: 10px; border-radius: 8px; margin-bottom: 8px; }
+.log .deps ul { margin: 6px 0 0; padding-left: 18px; }
+.log .deps li { list-style: disc; border: 0; padding: 2px 0; }
+.log .deps li.optional { opacity: .7; }
 .error { color: var(--danger); background: rgba(255,91,110,.1); padding: 10px; border-radius: 8px; }
 
 .result-head { display: flex; align-items: center; justify-content: space-between; }

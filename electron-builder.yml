@@ -11,9 +11,13 @@ files:
   - out/**
   - package.json
 
-# keep native whisper.cpp binary + downloaded models outside the asar archive
-asarUnpack:
-  - node_modules/nodejs-whisper/**
+# portable whisper-cli builds (scripts/build-whisper.sh), shipped next to app.asar;
+# models are downloaded at runtime into ~/.config/clauditor/models
+extraResources:
+  - from: vendor/whisper
+    to: whisper
+    filter:
+      - '**/whisper-cli'
 
 linux:
   target:

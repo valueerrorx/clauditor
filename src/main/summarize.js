@@ -102,7 +102,13 @@ export function summarize({ transcript, notes, filename, diarized = false, onLog
     proc.stdout.on('data', (d) => { stdout += d.toString() })
     proc.stderr.on('data', (d) => { stderr += d.toString() })
 
-    proc.on('error', reject)
+    proc.on('error', (e) =>
+      reject(
+        e.code === 'ENOENT'
+          ? new Error('Claude Code CLI ("claude") nicht gefunden – bitte installieren und einmal im Terminal einloggen.')
+          : e
+      )
+    )
     proc.on('close', (code) => {
       if (code === 0 && stdout.trim()) resolve(stdout.trim())
       // claude prints errors (e.g. 401 auth) to stdout, so include both streams

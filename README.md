@@ -18,34 +18,43 @@
 ## Funktionsweise
 
 1. **Aufnahme / Import**: `ffmpeg` liest zwei PulseAudio/PipeWire-Quellen gleichzeitig – dein Mikrofon und den `.monitor` deines Ausgabegeräts – und mischt sie live (`amix`) zu einer 16-kHz-Mono-WAV. Importierte Dateien werden ins gleiche Format konvertiert.
-2. **Transkription**: `nodejs-whisper` (whisper.cpp, lokal kompiliert) transkribiert die WAV offline. Mit aktivierter Sprechererkennung übernimmt stattdessen **WhisperX** Transkription + Diarisierung.
+2. **Transkription**: das mitgelieferte `whisper-cli` (whisper.cpp) transkribiert die WAV offline. Mit aktivierter Sprechererkennung übernimmt stattdessen **WhisperX** Transkription + Diarisierung.
 3. **Analyse**: Das Transkript geht zusammen mit allen vorhandenen `.md`-Protokollen an `claude -p` (Headless). Claude liefert das fertige Markdown-Protokoll zurück.
 4. **Speichern**: Ablage als `YYYY-MM-DD_HH-MM.md` im gewählten Ordner.
 
-## Voraussetzungen
+## Installation (AppImage)
 
-- Linux mit PipeWire/PulseAudio (`pactl`, `parec`)
+Die fertige `clauditor-x.y.z.AppImage` gibt es unter **Releases**. Herunterladen, ausführbar machen, starten:
+
+```bash
+chmod +x clauditor-*.AppImage
+./clauditor-*.AppImage
+```
+
+whisper.cpp ist bereits fertig kompiliert enthalten – kein cmake, kein Compiler, kein Node.js nötig. Auf dem System müssen nur vorhanden sein:
+
+- Linux mit PipeWire/PulseAudio (`pactl`)
 - `ffmpeg`
-- Node.js 20+
-- `claude` CLI installiert und eingeloggt
-- Build-Tools für whisper.cpp: `cmake`, `make`, `gcc`/`g++`
+- `claude` CLI installiert und **einmal im Terminal eingeloggt**
 - *(nur für Sprechererkennung)* [`uv`](https://docs.astral.sh/uv/) + HuggingFace-Token
 
-## Setup
+Fehlt eines davon, zeigt clauditor das beim Start im Status-Bereich an. Programme in `~/.local/bin`, `~/.nvm/…`, `~/.npm-global/bin` usw. werden auch gefunden, wenn die App aus dem Startmenü gestartet wird.
+
+Das gewählte Whisper-Modell wird beim ersten Transkribieren automatisch nach `~/.config/clauditor/models/` geladen (small ≈ 470 MB, large-v3-turbo ≈ 1,6 GB).
+
+## Entwicklung
+
+Zusätzlich nötig: Node.js 20+, `cmake`, `make`, `gcc`/`g++`.
 
 ```bash
 npm install
-# einmalig: Modell laden + whisper.cpp bauen (Standardmodell: small)
-node -e "require('nodejs-whisper/dist/autoDownloadModel').default(console,'small',false)"
+npm run dev        # baut beim ersten Mal whisper-cli nach vendor/whisper (≈1–2 min)
+npm run build      # AppImage + deb nach dist/
 ```
 
-## Starten
+`scripts/build-whisper.sh` kompiliert whisper.cpp statisch in zwei Varianten (AVX2 und generisch); die App wählt zur Laufzeit die passende für die CPU. `FORCE=1 npm run whisper` baut neu.
 
-```bash
-npm run dev
-```
-
-Im Fenster: Mikrofon + System-Ton (Monitor) wählen, Protokoll-Ordner setzen, **Aufnahme starten** → reden/Meeting → **Stoppen & Zusammenfassen**.
+Releases baut GitHub Actions automatisch, sobald die `version` in `package.json` auf `main` erhöht wird.
 
 ## Sprechererkennung (WhisperX)
 
@@ -58,11 +67,7 @@ Optional, einschaltbar über die Checkbox **„Sprechererkennung (WhisperX)"**. 
 
 ## Modell wechseln
 
-Über die Umgebungsvariable `CLAUDITOR_MODEL` (z. B. `medium`, `large-v3-turbo`). Neue Modelle werden beim ersten Lauf automatisch geladen und gebaut.
-
-```bash
-CLAUDITOR_MODEL=medium npm run dev
-```
+Über das Modell-Dropdown oben in der App (Standard: `small`). Neue Modelle werden beim ersten Lauf automatisch heruntergeladen.
 
 ## Lizenz
 

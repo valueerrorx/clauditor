@@ -26,12 +26,16 @@ import { listDevices, startRecording, stopRecording, measureMaxVolumeDb, convert
 import { transcribe, MODEL_NAME, MODELS } from './transcribe.js'
 import { diarize } from './diarize.js'
 import { summarize } from './summarize.js'
+import { fixPath, cleanEnv, checkDependencies } from './runtime.js'
 import { readExistingNotes, buildFilename, saveNote } from './notes.js'
 
 // app icon, bundled to out/ by electron-vite at build time
 import iconPath from '../assets/clauditor_icon.png?asset'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+
+// desktop/AppImage launches get a minimal PATH without ~/.local/bin (claude, uv)
+fixPath()
 
 let mainWindow = null
 let tray = null
@@ -128,6 +132,9 @@ function createTray() {
 }
 
 ipcMain.handle('devices:list', () => listDevices())
+
+// report missing external programs (ffmpeg, pactl, claude, uv) to the UI
+ipcMain.handle('deps:check', () => checkDependencies())
 
 // expose the available whisper models so the renderer can build its dropdown
 ipcMain.handle('config:get', async () => ({ ...(await loadConfig()), models: MODELS }))
@@ -291,26 +298,6 @@ async function resolveObsidianCommand() {
   return { cmd: tokens[0], args: tokens.slice(1) }
 }
 
-// strip AppImage runtime vars inherited from the host launcher (e.g. Cursor),
-// otherwise the spawned Obsidian AppImage reads the wrong APPDIR/ARGV0 and its
-// binfmt-bypass interpreter crashes before starting
-function cleanAppImageEnv() {
-  const env = { ...process.env }
-  const drop = [
-    'APPIMAGE', 'APPDIR', 'ARGV0', 'APPRUN', 'OWD',
-    'TARGET_APPIMAGE', 'REDIRECT_APPIMAGE', 'DESKTOPINTEGRATION',
-    'LD_LIBRARY_PATH', 'LD_PRELOAD', 'PERLLIB',
-    'GSETTINGS_SCHEMA_DIR', 'QT_PLUGIN_PATH'
-  ]
-  for (const key of drop) delete env[key]
-  // remove host-mount segments from list-style vars
-  for (const key of ['PATH', 'XDG_DATA_DIRS']) {
-    if (!env[key]) continue
-    env[key] = env[key].split(':').filter((p) => !p.includes('/.mount_')).join(':')
-  }
-  return env
-}
-
 // register a folder as an Obsidian vault and return its id; Obsidian only opens
 // a folder as a vault when it is listed in obsidian.json (the CLI path arg is ignored)
 async function ensureObsidianVault(dir) {
@@ -349,7 +336,7 @@ ipcMain.handle('folder:openObsidian', async () => {
   const child = spawn(cmd, [...args, `obsidian://open?vault=${vaultId}`], {
     detached: true,
     stdio: 'ignore',
-    env: cleanAppImageEnv()
+    env: cleanEnv()
   })
   child.unref()
   return true
