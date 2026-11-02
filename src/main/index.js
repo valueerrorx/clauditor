@@ -26,7 +26,7 @@ import { listDevices, startRecording, stopRecording, measureMaxVolumeDb, convert
 import { transcribe, MODEL_NAME, MODELS } from './transcribe.js'
 import { diarize } from './diarize.js'
 import { summarize } from './summarize.js'
-import { fixPath, cleanEnv, checkDependencies } from './runtime.js'
+import { fixPath, cleanEnv, checkDependencies, assertDependencies } from './runtime.js'
 import { readExistingNotes, buildFilename, saveNote } from './notes.js'
 
 // app icon, bundled to out/ by electron-vite at build time
@@ -134,7 +134,10 @@ function createTray() {
 ipcMain.handle('devices:list', () => listDevices())
 
 // report missing external programs (ffmpeg, pactl, claude, uv) to the UI
-ipcMain.handle('deps:check', () => checkDependencies())
+ipcMain.handle('deps:check', async () => {
+  const cfg = await loadConfig()
+  return checkDependencies({ diarization: Boolean(cfg.diarization) })
+})
 
 // expose the available whisper models so the renderer can build its dropdown
 ipcMain.handle('config:get', async () => ({ ...(await loadConfig()), models: MODELS }))
@@ -172,6 +175,8 @@ ipcMain.handle('config:chooseDir', async () => {
 
 ipcMain.handle('record:start', async (_e, { mic, monitor }) => {
   if (recProc) throw new Error('Aufnahme läuft bereits')
+  // refuse to start when e.g. claude is missing, instead of failing after the meeting
+  await assertDependencies({ diarization: Boolean((await loadConfig()).diarization) })
   const dir = join(tmpdir(), 'clauditor')
   await mkdir(dir, { recursive: true })
   recFile = join(dir, `rec-${Date.now()}.wav`)
@@ -235,6 +240,7 @@ async function processAudio(wav) {
 
 // import an existing audio file: convert to wav, then run the shared pipeline
 ipcMain.handle('import:audio', async () => {
+  await assertDependencies({ diarization: Boolean((await loadConfig()).diarization) })
   const res = await dialog.showOpenDialog(mainWindow, {
     title: 'Audio-Datei importieren',
     properties: ['openFile'],

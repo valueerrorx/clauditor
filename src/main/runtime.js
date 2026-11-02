@@ -16,9 +16,9 @@
 // menu (minimal PATH, read-only mount, no build tools).
 
 import { app } from 'electron'
-import { execFileSync } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { accessSync, constants, readFileSync, readdirSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 
 // AppImage runtime vars that must not leak into spawned host programs
@@ -136,13 +136,80 @@ export function modelsDir() {
   return join(app.getPath('userData'), 'models')
 }
 
-// check external programs the app relies on, for a hint in the UI
-export function checkDependencies() {
+// ask the Claude Code CLI whether it is logged in; null when it cannot tell
+// (e.g. an older CLI without `auth status`), so we never block on a guess
+function claudeLoggedIn(bin) {
+  return new Promise((resolve) => {
+    execFile(bin, ['auth', 'status', '--json'], { timeout: 15000, cwd: tmpdir() }, (err, stdout) => {
+      try {
+        const json = JSON.parse(stdout)
+        if (typeof json.loggedIn === 'boolean') return resolve(json)
+      } catch {}
+      resolve(null)
+    })
+  })
+}
+
+// check external programs the app relies on, so the UI can flag problems up front
+// instead of failing after a long recording + transcription
+export async function checkDependencies({ diarization = false } = {}) {
   const deps = [
-    { name: 'ffmpeg', hint: 'für Aufnahme und Import (Paket "ffmpeg")', required: true },
-    { name: 'pactl', hint: 'zum Auflisten der Audioquellen (Paket "pulseaudio-utils" bzw. "libpulse")', required: true },
-    { name: 'claude', hint: 'Claude Code CLI, installiert und eingeloggt (https://claude.com/claude-code)', required: true },
-    { name: 'uv', hint: 'nur für die Sprechererkennung (https://docs.astral.sh/uv/)', required: false }
+    {
+      name: 'ffmpeg',
+      required: true,
+      purpose: 'Aufnahme und Import',
+      fix: 'Paket "ffmpeg" über die Paketverwaltung installieren.'
+    },
+    {
+      name: 'pactl',
+      required: true,
+      purpose: 'Audioquellen auflisten',
+      fix: 'Paket "pulseaudio-utils" (Debian/Ubuntu) bzw. "libpulse" (Arch/Fedora) installieren.'
+    },
+    {
+      name: 'claude',
+      required: true,
+      purpose: 'Zusammenfassung',
+      fix: 'Claude Code installieren, z. B. "curl -fsSL https://claude.ai/install.sh | bash".',
+      link: 'https://docs.claude.com/en/docs/claude-code/setup'
+    },
+    {
+      name: 'uv',
+      // only needed for WhisperX; becomes blocking once diarization is switched on
+      required: diarization,
+      purpose: 'Sprechererkennung (WhisperX)',
+      fix: 'uv installieren: "curl -LsSf https://astral.sh/uv/install.sh | sh".',
+      link: 'https://docs.astral.sh/uv/getting-started/installation/'
+    }
   ]
-  return deps.map((d) => ({ ...d, found: Boolean(which(d.name)) }))
+
+  return Promise.all(
+    deps.map(async (d) => {
+      const path = which(d.name)
+      if (!path) return { ...d, ok: false, problem: 'nicht gefunden' }
+      if (d.name === 'claude') {
+        const auth = await claudeLoggedIn(path)
+        if (auth && !auth.loggedIn) {
+          return {
+            ...d,
+            ok: false,
+            problem: 'nicht angemeldet',
+            fix: 'Einmal im Terminal "claude" starten und anmelden (oder "claude auth login"), danach "Erneut prüfen".'
+          }
+        }
+        return { ...d, ok: true, account: auth?.email || '' }
+      }
+      return { ...d, ok: true }
+    })
+  )
+}
+
+// throw early when a required program is missing, before recording/transcribing
+export async function assertDependencies(opts) {
+  const missing = (await checkDependencies(opts)).filter((d) => d.required && !d.ok)
+  if (missing.length) {
+    throw new Error(
+      `Voraussetzungen fehlen: ${missing.map((d) => `${d.name} (${d.problem})`).join(', ')} – siehe Hinweis oben.`
+    )
+  }
 }

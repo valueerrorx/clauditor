@@ -37,8 +37,12 @@ const procElapsed = ref(0)
 const logs = ref([])
 const result = ref(null)
 const error = ref('')
-// external programs that are missing on this system (ffmpeg, pactl, claude, uv)
-const missingDeps = ref([])
+// status of external programs (ffmpeg, pactl, claude incl. login, uv)
+const deps = ref([])
+const checkingDeps = ref(false)
+const depProblems = computed(() => deps.value.filter((d) => !d.ok))
+// a missing required program blocks recording/import up front
+const blocked = computed(() => depProblems.value.some((d) => d.required))
 
 const activeTab = ref('preview')
 const editContent = ref('')
@@ -139,6 +143,22 @@ watch(() => logs.value.length, async () => {
   if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight
 })
 
+async function checkDeps() {
+  checkingDeps.value = true
+  try {
+    deps.value = await window.api.checkDeps()
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    checkingDeps.value = false
+  }
+}
+
+// re-check when the user comes back to the window, e.g. after installing claude in a terminal
+function onFocus() {
+  if (depProblems.value.length && !recording.value && !busy.value) checkDeps()
+}
+
 async function loadDevices() {
   const d = await window.api.listDevices()
   mics.value = d.mics
@@ -178,6 +198,7 @@ async function saveModel() {
 async function saveDiarization() {
   try {
     await window.api.setConfig({ diarization: diarization.value, hfToken: hfToken.value })
+    checkDeps()
   } catch (e) {
     error.value = e.message
   }
@@ -251,9 +272,8 @@ function openExternal(url) {
 
 onMounted(async () => {
   unsubscribe = window.api.onLog(pushLog)
-  try {
-    missingDeps.value = (await window.api.checkDeps()).filter((d) => !d.found)
-  } catch {}
+  window.addEventListener('focus', onFocus)
+  checkDeps()
   try {
     await Promise.all([loadDevices(), loadConfig()])
   } catch (e) {
@@ -262,6 +282,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('focus', onFocus)
   clearInterval(timer)
   clearInterval(procTimer)
   unsubscribe?.()
@@ -284,6 +305,23 @@ onBeforeUnmount(() => {
     </header>
 
     <section class="controls">
+      <div v-if="depProblems.length" class="deps" :class="{ blocking: blocked }">
+        <div class="deps-head">
+          <strong>{{ blocked ? 'Einrichtung unvollständig – Aufnahme noch nicht möglich' : 'Hinweis' }}</strong>
+          <button class="btn-ghost" @click="checkDeps" :disabled="checkingDeps">
+            {{ checkingDeps ? 'Prüfe …' : 'Erneut prüfen' }}
+          </button>
+        </div>
+        <ul>
+          <li v-for="d in depProblems" :key="d.name">
+            <code>{{ d.name }}</code> {{ d.problem }} <span class="muted">({{ d.purpose }}{{ d.required ? '' : ', optional' }})</span>
+            <div class="fix">
+              {{ d.fix }}
+              <a v-if="d.link" href="#" @click.prevent="openExternal(d.link)">Anleitung</a>
+            </div>
+          </li>
+        </ul>
+      </div>
       <div class="row sources">
         <label>
           <span>Mikrofon</span>
@@ -345,9 +383,9 @@ onBeforeUnmount(() => {
       </p>
 
       <div class="actions">
-        <button v-if="!recording" class="btn-primary big" @click="start" :disabled="busy">● Aufnahme starten</button>
+        <button v-if="!recording" class="btn-primary big" @click="start" :disabled="busy || blocked" :title="blocked ? 'Erst die fehlenden Programme oben einrichten' : ''">● Aufnahme starten</button>
         <button v-else class="btn-danger big" @click="stop">■ Stoppen & Zusammenfassen</button>
-        <button class="btn-ghost big" @click="importAudio" :disabled="recording || busy">⇪ Audio importieren</button>
+        <button class="btn-ghost big" @click="importAudio" :disabled="recording || busy || blocked" :title="blocked ? 'Erst die fehlenden Programme oben einrichten' : ''">⇪ Audio importieren</button>
         <span class="spacer"></span>
         <label class="lang">
           <span>Sprache</span>
@@ -369,14 +407,6 @@ onBeforeUnmount(() => {
     <section class="panels" :style="panelStyle">
       <div class="panel log" ref="logEl">
         <h2>Status</h2>
-        <div v-if="missingDeps.length" class="deps">
-          <strong>Fehlende Programme:</strong>
-          <ul>
-            <li v-for="d in missingDeps" :key="d.name" :class="{ optional: !d.required }">
-              <code>{{ d.name }}</code> – {{ d.hint }}<span v-if="!d.required"> (optional)</span>
-            </li>
-          </ul>
-        </div>
         <p v-if="error" class="error">{{ error }}</p>
         <ul>
           <li v-for="(l, i) in logs" :key="i"><span class="time">{{ l.t }}</span>{{ l.msg }}</li>
@@ -492,10 +522,15 @@ onBeforeUnmount(() => {
 .log li { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
 .log .time { color: var(--muted); margin-right: 8px; font-variant-numeric: tabular-nums; }
 .muted { color: var(--muted); }
-.deps { color: #f5b041; background: rgba(245,176,65,.1); padding: 10px; border-radius: 8px; margin-bottom: 8px; }
-.log .deps ul { margin: 6px 0 0; padding-left: 18px; }
-.log .deps li { list-style: disc; border: 0; padding: 2px 0; }
-.log .deps li.optional { opacity: .7; }
+.deps { color: #f5b041; background: rgba(245,176,65,.1); border: 1px solid rgba(245,176,65,.35); padding: 12px 14px; border-radius: 8px; margin-bottom: 16px; font-size: 13px; }
+.deps.blocking { color: var(--danger); background: rgba(255,91,110,.1); border-color: rgba(255,91,110,.4); }
+.deps-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.deps ul { margin: 8px 0 0; padding-left: 18px; }
+.deps li { margin: 6px 0; }
+.deps code { color: var(--text); font-weight: 600; }
+.deps .muted { color: var(--muted); }
+.deps .fix { color: var(--text); opacity: .85; margin-top: 2px; }
+.deps a { color: var(--accent); text-decoration: underline; margin-left: 4px; }
 .error { color: var(--danger); background: rgba(255,91,110,.1); padding: 10px; border-radius: 8px; }
 
 .result-head { display: flex; align-items: center; justify-content: space-between; }
